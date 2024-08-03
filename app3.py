@@ -63,7 +63,7 @@ def query_llama2(json_file, category, grammar):
     rule_prompt = f"""
     Please analyze the following JSON file and for each brand that is a key, read their description to identify 
     if they are present in one of the following categories: {category}.
-    Return the result in the following JSON format:
+    Return only your json output in the following JSON format:
     {{
         "Brand1": ["Category1", "Category2", ...],
         "Brand2": ["Category1", "Category2", ...]
@@ -75,16 +75,25 @@ def query_llama2(json_file, category, grammar):
     """
 
     # Perform the query using the invoke method
-    response = ollama_client.invoke(rule_prompt)
+    response = ollama_client.invoke(rule_prompt, grammar=grammar)
 
     # Print the raw response for debugging
     print("Raw response:", response)
 
     # Extract JSON part from the response
     json_part = extract_json(response)
+    print("JSON PART",json_part)
+
+
+
+    with open("outputs/app3.txt", "w") as f:
+        f.write(json_part)
+
     if json_part:
         try:
+            print("json part found")
             json_response = json.loads(json_part)
+            print("json loaded successfully", json_response)
         except json.JSONDecodeError as e:
             print(f"Error decoding JSON response: {e}")
             json_response = {}
@@ -96,9 +105,12 @@ def query_llama2(json_file, category, grammar):
 
 # Example usage
 if __name__ == "__main__":
+    print("The response will be printed here:")
     response = query_llama2(json_content, category_list, general_json)
+
     print(json.dumps(response, indent=2))
 
     # Save the response to a file
-    with open("outputs/app3.json", "w") as f:
-        json.dump(response, f, indent=2)
+    # with open("outputs/app3.json", "w") as f:
+    #     json.dump(response, f, indent=2)
+
