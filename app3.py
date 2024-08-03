@@ -110,7 +110,6 @@ if __name__ == "__main__":
 
     print(json.dumps(response, indent=2))
 
-    # Save the response to a file
-    # with open("outputs/app3.json", "w") as f:
-    #     json.dump(response, f, indent=2)
+    with open("outputs/app3.json", "w") as f:
+        json.dump(response, f, indent=2)
 

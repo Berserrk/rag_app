@@ -1,1 +1,15 @@
-{}
+{
+  "Burger king": [
+    "food"
+  ],
+  "Volvo": [
+    "cars",
+    "multinationals"
+  ],
+  "Audi": [
+    "cars"
+  ],
+  "Swisscom": [
+    "technology"
+  ]
+}
