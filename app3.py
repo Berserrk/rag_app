@@ -55,9 +55,10 @@ def extract_json(text):
         print(f"Error extracting JSON: {e}")
     return None
 
-def query_llama2(json_file, category, grammar):
-    # Initialize the Ollama client for Llama2
-    ollama_client = Ollama(model="llama3.1")
+def query_model(json_file, category, grammar):
+    # Initialize the Ollama client regarding a specific model
+    # ollama_client = Ollama(model="llama3.1")
+    ollama_client = Ollama(model="mistral")
 
     # Define the prompt to enforce the JSON structure
     rule_prompt = f"""
@@ -106,7 +107,7 @@ def query_llama2(json_file, category, grammar):
 # Example usage
 if __name__ == "__main__":
     print("The response will be printed here:")
-    response = query_llama2(json_content, category_list, general_json)
+    response = query_model(json_content, category_list, general_json)
 
     print(json.dumps(response, indent=2))
 
