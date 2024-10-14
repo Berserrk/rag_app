@@ -1,19 +1,26 @@
-import requests
+import torch
+from transformers import AutoTokenizer, AutoModel, GPT2LMHeadModel, GPT2Tokenizer
 import json
 import time
-import concurrent.futures
-from functools import partial
-import threading
-import random
-import torch
-from sentence_transformers import SentenceTransformer
 
-# Load the model with GPU support
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2').to(device)
+# Check for GPU availability
+if not torch.cuda.is_available():
+    raise RuntimeError("This script requires a GPU with CUDA support.")
 
-url = "http://localhost:11434/api/generate"
+device = torch.device("cuda")
+print(f"Using device: {device}")
+
+# Load pre-trained models and tokenizers
+embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+embedding_tokenizer = AutoTokenizer.from_pretrained(embedding_model_name)
+embedding_model = AutoModel.from_pretrained(embedding_model_name).to(device)
+
+lm_model_name = "gpt2"  # You might want to use a larger model if available
+lm_tokenizer = GPT2Tokenizer.from_pretrained(lm_model_name)
+lm_model = GPT2LMHeadModel.from_pretrained(lm_model_name).to(device)
+
 categories_list = ["criminal", "fraud", "politics"]
+
 rule = """
 Task: You are an agent that is analyzing a JSON file.
 Inputs:
@@ -31,114 +38,85 @@ Example:
 }}
 """
 
-# Global variable to track active threads
-active_threads = 0
-thread_lock = threading.Lock()
+def generate_response(prompt, max_length=100):
+    inputs = lm_tokenizer.encode(prompt, return_tensors="pt").to(device)
+    attention_mask = torch.ones(inputs.shape, device=device)
+    
+    with torch.no_grad():
+        outputs = lm_model.generate(
+            inputs,
+            attention_mask=attention_mask,
+            max_length=max_length,
+            num_return_sequences=1,
+            no_repeat_ngram_size=2,
+            do_sample=True,
+            top_k=50,
+            top_p=0.95,
+            temperature=0.7
+        )
+    
+    return lm_tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-# Simulated API call (can be adapted for actual use)
-def llama3(json_file, rule, categories_list, entity):
-    # Simulate API call with random delay
-    time.sleep(random.uniform(1, 3))
-    
-    # Simulated response
-    categories = random.sample(categories_list, random.randint(1, len(categories_list)))
-    response = json.dumps({entity: {"categories": categories}})
-    
-    return response
-
-# Process entity using the GPU and the model
-def process_entity(entity, json_file, rule, categories_list):
-    global active_threads
-    with thread_lock:
-        active_threads += 1
-        current_threads = active_threads
-    
-    thread_id = threading.get_ident()
-    print(f"Thread {thread_id} started processing entity: {entity}. Active threads: {current_threads}")
-    
-    start_time = time.time()
-    try:
-        # Load the specific JSON data for the entity
-        entity_data = json_file.get(entity, {})
+def process_entities(entities, batch_size=32):
+    results = {}
+    for i in range(0, len(entities), batch_size):
+        batch = list(entities.keys())[i:i+batch_size]
         
-        # Convert the entity data into a string or text to be processed
-        json_string = json.dumps(entity_data)
-
-        # Use SentenceTransformer to process the JSON data on GPU
-        embeddings = model.encode([json_string], device=device, convert_to_tensor=True)
-
-        # Simulated llama3 API response based on embedding (dummy here)
-        response = llama3(json_file, rule, categories_list, entity)
-        result = json.loads(response)
-
-        print(f"Thread {thread_id} completed {entity}. Categories: {result[entity]['categories']}")
-        return entity, result
-    except Exception as e:
-        print(f"Thread {thread_id} failed to process {entity}, reason: {e}")
-        return entity, None
-    finally:
-        end_time = time.time()
-        print(f"Thread {thread_id} took {end_time - start_time:.2f} seconds to process {entity}")
-        with thread_lock:
-            active_threads -= 1
+        # Tokenize and encode the batch
+        encoded_input = embedding_tokenizer(batch, padding=True, truncation=True, return_tensors='pt').to(device)
+        
+        # Get the embeddings
+        with torch.no_grad():
+            model_output = embedding_model(**encoded_input)
+            embeddings = model_output.last_hidden_state[:, 0, :]  # CLS token embedding
+        
+        # Process each entity in the batch
+        for entity, embedding in zip(batch, embeddings):
+            prompt = rule.format(
+                json_file=json.dumps({entity: entities[entity]}),
+                categories_list=categories_list,
+                entity=entity
+            )
+            response = generate_response(prompt)
+            try:
+                result = json.loads(response)
+                results[entity] = result[entity]
+            except json.JSONDecodeError:
+                print(f"Failed to parse response for {entity}. Setting 'no label'.")
+                results[entity] = {"categories": ["no label"]}
+        
+        print(f"Processed batch {i//batch_size + 1}/{len(entities)//batch_size + 1}")
+    
+    return results
 
 def main():
     print("Starting the processing of entities...")
-
-    # Load the JSON data from file or construct it in-memory
-    try:
-        with open('input_file.json', 'r') as file:
-            file_json = json.load(file)
-    except FileNotFoundError:
-        # If no file is found, create simulated JSON data
-        entities = [f"entity{i}" for i in range(1, 21)]  # 20 entities
-        file_json = {entity: {"text": f"Sample data for {entity}."} for entity in entities}
     
-    print(f"Loaded {len(file_json)} entities.")
-
-    results = {}
-    failed_entities = []
-
-    # Partial function to fix other arguments
-    process_func = partial(process_entity, json_file=file_json, rule=rule, categories_list=categories_list)
-
-    # Process entities in parallel using ThreadPoolExecutor
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        future_to_entity = {executor.submit(process_func, entity): entity for entity in file_json}
-        for future in concurrent.futures.as_completed(future_to_entity):
-            entity = future_to_entity[future]
-            try:
-                entity, result = future.result()
-                if result is not None:
-                    results[entity] = result
-                else:
-                    failed_entities.append(entity)
-            except Exception as e:
-                print(f"Unexpected error processing {entity}: {e}")
-                failed_entities.append(entity)
-
-    # Retry failed entities (if any)
-    if failed_entities:
-        print(f"\nRetrying {len(failed_entities)} failed entities...")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            retry_futures = {executor.submit(process_func, entity): entity for entity in failed_entities}
-            for future in concurrent.futures.as_completed(retry_futures):
-                entity = retry_futures[future]
-                try:
-                    entity, result = future.result()
-                    if result is not None:
-                        results[entity] = result
-                    else:
-                        print(f"Failed to process {entity} on retry")
-                except Exception as e:
-                    print(f"Unexpected error processing {entity} on retry: {e}")
-
-    print("\nAll entities processed. Results:")
-    for entity, result in results.items():
-        print(f"{entity}: {result[entity]['categories']}")
+    # Read input JSON file
+    input_file = "entity_summary.json"
+    with open(input_file, 'r') as f:
+        entities = json.load(f)
+    
+    print(f"Loaded {len(entities)} entities from {input_file}")
+    
+    start_time = time.time()
+    results = process_entities(entities)
+    end_time = time.time()
+    
+    print("\nAll entities processed. Saving results...")
+    
+    # Write results to output JSON file
+    output_file = "output.json"
+    with open(output_file, 'w') as f:
+        json.dump(results, f, indent=2)
+    
+    print(f"Results saved to {output_file}")
+    
+    print("\nSample results:")
+    for entity in list(results.keys())[:5]:  # Show first 5 results
+        print(f"{entity}: {results[entity]['categories']}")
+    
+    print(f"\nTotal execution time: {end_time - start_time:.2f} seconds")
 
 if __name__ == "__main__":
-    start_time = time.time()
     main()
-    end_time = time.time()
-    print(f"\nTotal execution time: {end_time - start_time:.2f} seconds")
