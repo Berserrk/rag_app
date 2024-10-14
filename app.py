@@ -1,115 +1,77 @@
-from flask import Flask, request
-from langchain_community.llms import Ollama
-from langchain_community.vectorstores import Chroma
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
-from langchain_community.document_loaders import PDFPlumberLoader
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain.chains import create_retrieval_chain
-from langchain.prompts import PromptTemplate
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import json
+import time
+from transformers import AutoTokenizer, AutoModel
 
-app = Flask(__name__)
+# Check if CUDA is available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
 
-folder_path = "db"
-cached_llm = Ollama(model="llama3.1")
+# Load pre-trained model and tokenizer
+model_name = "sentence-transformers/all-MiniLM-L6-v2"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModel.from_pretrained(model_name).to(device)
 
+categories_list = ["criminal", "fraud", "politics"]
 
-embedding = FastEmbedEmbeddings()
-
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1024, chunk_overlap=80, length_function=len, is_separator_regex=False
-)
-
-raw_prompt = PromptTemplate.from_template(
-    '''
-    <s>[INST] You are a technical assistant good at searching documents.
-    If you do not have an answer from the provided information say so . [/INST] </s>
-    [INST] 
-    {input} 
-    Context : {context}
-    Answer: 
-    [/INST]
-'''
-)
-
-@app.route("/ai", methods=["POST"])
-def aiPost():
-    print("Post /ai called")
-    json_content = request.json
-    query = json_content["query"]
-    print("Query: ", query)
-
-    response = cached_llm.invoke(query)
-    print(response)
+class CategoryClassifier(nn.Module):
+    def __init__(self, input_dim, num_categories):
+        super(CategoryClassifier, self).__init__()
+        self.fc = nn.Linear(input_dim, num_categories)
     
-    response_answer =  {
-        "answer": response
-    }
-    return response_answer
+    def forward(self, x):
+        return torch.sigmoid(self.fc(x))
 
+# Initialize the classifier
+classifier = CategoryClassifier(384, len(categories_list)).to(device)  # 384 is the output dim of the model
 
-@app.route("/ask_pdf", methods=["POST"])
-def ask_pdf_post():
-    print("Post /ask_pdf called")
-    json_content = request.json
-    query = json_content["query"]
-    print("Query: ", query)
+def process_entities(entities, batch_size=32):
+    results = {}
+    
+    for i in range(0, len(entities), batch_size):
+        batch = entities[i:i+batch_size]
+        
+        # Tokenize and encode the batch
+        encoded_input = tokenizer(batch, padding=True, truncation=True, return_tensors='pt').to(device)
+        
+        # Get the embeddings
+        with torch.no_grad():
+            model_output = model(**encoded_input)
+            embeddings = model_output.last_hidden_state[:, 0, :]  # CLS token embedding
+        
+        # Classify
+        with torch.no_grad():
+            predictions = classifier(embeddings)
+        
+        # Process predictions
+        for entity, pred in zip(batch, predictions):
+            categories = [categories_list[i] for i, p in enumerate(pred) if p > 0.5]
+            if not categories:
+                categories = ["no label"]
+            results[entity] = {"categories": categories}
+        
+        print(f"Processed batch {i//batch_size + 1}/{len(entities)//batch_size + 1}")
+    
+    return results
 
-    print("Loading vector store")
-    vector_store = Chroma(persist_directory=folder_path, embedding_function=embedding)
+def main():
+    print("Starting the processing of entities...")
 
-    print("creating chain")
-    retriever = vector_store.as_retriever(
-        search_type = "similarity_score_threshold",
-        search_kwargs={
-            "k": 20,
-            "score_threshold": 0.1,
-        }
-    )
+    # Simulated entities
+    entities = [f"entity{i}" for i in range(1, 1001)]  # 1000 entities
+    print(f"Loaded {len(entities)} entities.")
 
-    document_chain = create_stuff_documents_chain(cached_llm, raw_prompt)
-    chain = create_retrieval_chain(retriever, document_chain)
+    start_time = time.time()
+    results = process_entities(entities)
+    end_time = time.time()
 
-    result = chain.invoke({"input": query})
-    print(result)
-    response_answer =  {
-        "answer": result['answer']
-    }
-    return response_answer
+    print("\nAll entities processed. Sample results:")
+    for entity in list(results.keys())[:5]:  # Show first 5 results
+        print(f"{entity}: {results[entity]['categories']}")
 
-
-@app.route("/pdf", methods=["POST"])
-def pdf_post():
-    file = request.files['file']
-    file_name = file.filename
-    save_file = "pdf/" + file_name
-    file.save(save_file)
-    print(f"filename: {file_name}")
-
-    loader = PDFPlumberLoader(save_file)
-    docs = loader.load_and_split(text_splitter)
-    print(f"docs len={len(docs)}")
-
-    chunks = text_splitter.split_documents(docs)
-    print(f"chunks len={len(chunks)}")
-
-    vector_store = Chroma.from_documents(
-        documents=chunks,
-        embedding=embedding,
-        persist_directory=folder_path
-    )
-    vector_store.persist()
-
-    response = {
-        "status": "successfully uploaded",
-        "filename": file_name,
-        "doc_len": + len(docs),
-        "chunk": len(chunks)
-    }
-    return response
-
-def start_app():
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    print(f"\nTotal execution time: {end_time - start_time:.2f} seconds")
 
 if __name__ == "__main__":
-    start_app()
+    main()
