@@ -58,14 +58,16 @@ def process_entity(entity, json_file, rule, categories_list):
     
     start_time = time.time()
     try:
-        # Simulate the embedding generation using the SentenceTransformer
-        json_data = json.dumps(json_file)
-        sentences = [json_data]  # Prepare a list of inputs (in this case, JSON strings)
+        # Load the specific JSON data for the entity
+        entity_data = json_file.get(entity, {})
         
-        # Compute embeddings on the GPU
-        embeddings = model.encode(sentences, device=device, convert_to_tensor=True)
+        # Convert the entity data into a string or text to be processed
+        json_string = json.dumps(entity_data)
 
-        # Simulated llama3 API response
+        # Use SentenceTransformer to process the JSON data on GPU
+        embeddings = model.encode([json_string], device=device, convert_to_tensor=True)
+
+        # Simulated llama3 API response based on embedding (dummy here)
         response = llama3(json_file, rule, categories_list, entity)
         result = json.loads(response)
 
@@ -83,9 +85,15 @@ def process_entity(entity, json_file, rule, categories_list):
 def main():
     print("Starting the processing of entities...")
 
-    # Simulated entities
-    entities = [f"entity{i}" for i in range(1, 21)]  # 20 entities
-    file_json = {entity: {} for entity in entities}
+    # Load the JSON data from file or construct it in-memory
+    try:
+        with open('input_file.json', 'r') as file:
+            file_json = json.load(file)
+    except FileNotFoundError:
+        # If no file is found, create simulated JSON data
+        entities = [f"entity{i}" for i in range(1, 21)]  # 20 entities
+        file_json = {entity: {"text": f"Sample data for {entity}."} for entity in entities}
+    
     print(f"Loaded {len(file_json)} entities.")
 
     results = {}
