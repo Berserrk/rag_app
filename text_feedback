@@ -1,20 +1,32 @@
 import streamlit as st
 import pandas as pd
 
+# Define your categories list
+categories_list = [
+    'money laundering', 'fraud', 'cybercrime', 'identity theft', 
+    'tax evasion', 'insider trading', 'market manipulation',
+    'embezzlement', 'bribery', 'corruption', 'counterfeiting',
+    'sanctions violation', 'terrorist financing', 'pyramid scheme',
+    'data breach'
+]
+
 def initialize_data():
     """Initialize the session state if it doesn't exist"""
+    # Create columns list with fixed fields and all categories
+    columns = ['entity'] + categories_list + ['summary']
     if 'data' not in st.session_state:
-        st.session_state.data = pd.DataFrame(columns=['entity', 'money laundering', 'fraud', 'summary'])
+        st.session_state.data = pd.DataFrame(columns=columns)
 
-def add_data(entity, money_laundering, fraud, summary):
+def add_data(entity, category_values, summary):
     """Add a new row to the dataframe"""
-    new_data = pd.DataFrame({
-        'entity': [entity],
-        'money laundering': [money_laundering],
-        'fraud': [fraud],
-        'summary': [summary]
-    })
-    st.session_state.data = pd.concat([st.session_state.data, new_data], ignore_index=True)
+    # Create a dictionary with all data
+    new_data = {'entity': [entity], 'summary': [summary]}
+    # Add all category values
+    for category, value in category_values.items():
+        new_data[category] = [value]
+    
+    new_row = pd.DataFrame(new_data)
+    st.session_state.data = pd.concat([st.session_state.data, new_row], ignore_index=True)
 
 def main():
     st.title("Data Entry Form")
@@ -27,23 +39,33 @@ def main():
         # Text input for entity
         entity = st.text_input("Entity Name")
         
-        # Checkboxes for money laundering and fraud
-        col1, col2 = st.columns(2)
-        with col1:
-            money_laundering = st.checkbox("Money Laundering")
-        with col2:
-            fraud = st.checkbox("Fraud")
-            
+        # Create checkbox inputs for categories
+        st.subheader("Categories")
+        
+        # Calculate number of columns needed (3 columns layout)
+        num_cols = 3
+        cols = st.columns(num_cols)
+        
+        # Dictionary to store category values
+        category_values = {}
+        
+        # Distribute categories across columns
+        for i, category in enumerate(categories_list):
+            with cols[i % num_cols]:
+                # Convert category to display format (capitalize words)
+                display_name = ' '.join(word.capitalize() for word in category.split('_'))
+                category_values[category] = st.checkbox(display_name)
+        
         # Text area for summary
-        summary = st.text_area("Summary", height=100, 
-                             help="Enter any additional details or notes about this entity")
+        st.subheader("Summary")
+        summary = st.text_area("Enter additional details", height=100)
         
         # Submit button
         submitted = st.form_submit_button("Add Entry")
         
         if submitted:
             if entity.strip():  # Check if entity is not empty
-                add_data(entity, money_laundering, fraud, summary)
+                add_data(entity, category_values, summary)
                 st.success("Data added successfully!")
             else:
                 st.error("Please enter an entity name")
@@ -52,17 +74,33 @@ def main():
     st.subheader("Current Data")
     
     # Configure the display of the dataframe
-    # Use a style formatter to wrap text in the summary column
     if not st.session_state.data.empty:
+        # Configure column display properties
+        column_config = {
+            "entity": st.column_config.TextColumn(
+                "Entity",
+                width="medium"
+            ),
+            "summary": st.column_config.TextColumn(
+                "Summary",
+                width="medium",
+                help="Entity summary and additional notes"
+            )
+        }
+        
+        # Add configurations for category columns
+        for category in categories_list:
+            display_name = ' '.join(word.capitalize() for word in category.split('_'))
+            column_config[category] = st.column_config.CheckboxColumn(
+                display_name,
+                help=f"Indicates if {display_name} is applicable",
+                width="small"
+            )
+        
         st.dataframe(
             st.session_state.data,
-            column_config={
-                "summary": st.column_config.TextColumn(
-                    "Summary",
-                    width="medium",
-                    help="Entity summary and additional notes"
-                )
-            }
+            column_config=column_config,
+            hide_index=True
         )
     
     # Add download button
