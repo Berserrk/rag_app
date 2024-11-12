@@ -1,58 +1,26 @@
-import streamlit as st
-import pandas as pd
-
 # Sample data
-data = {
-    "Frozen Column": ["Row 1", "Row 2", "Row 3", "Row 4"],
-    "Column 1": [10, 20, 30, 40],
-    "Column 2": [15, 25, 35, 45],
-    "Column 3": [20, 30, 40, 50],
-}
+data = {'Name': ['John', 'Jane', 'Bob', 'Alice'],
+        'Age': [25, 30, 35, 40],
+        'City': ['New York', 'London', 'Paris', 'Tokyo']}
 
 df = pd.DataFrame(data)
 
-# Inject custom CSS to style the scrollbar with reduced width
-st.markdown("""
-    <style>
-    /* Width of the scrollbar */
-    ::-webkit-scrollbar {
-        width: 10px;  /* Adjusted width for vertical scrollbar */
-        height: 10px; /* Adjusted height for horizontal scrollbar */
-    }
+# Display the table with rotated column names
+st.title("My Table")
+col_names = df.columns
+col_widths = [200, 200, 400]  # Adjust the column widths in pixels
 
-    /* Background of the scrollbar */
-    ::-webkit-scrollbar-track {
-        background: #f1f1f1;  /* Light background color for scrollbar track */
-    }
+with st.expander("Table"):
+    # Create a container to hold the table
+    with st.container():
+        # Create a row for the column names
+        row = st.columns(len(col_names), gap="medium")
+        for i, name in enumerate(col_names):
+            with row[i]:
+                # Use Markdown to create a rotated column name
+                st.markdown(f"<div style='transform: rotate(-45deg); text-align: right;'>{name}</div>", unsafe_allow_html=True)
+                # Set the column width programmatically
+                st.write(f'<div style="width:{col_widths[i]}px;">&nbsp;</div>', unsafe_allow_html=True)
 
-    /* Handle color of the scrollbar */
-    ::-webkit-scrollbar-thumb {
-        background: #888;  /* Darker color for scrollbar thumb */
-        border-radius: 8px; /* Slightly rounded corners for thumb */
-    }
-
-    /* Handle hover color of the scrollbar */
-    ::-webkit-scrollbar-thumb:hover {
-        background: #555;  /* Darker color on hover */
-    }
-
-    /* Firefox scrollbar styling */
-    body {
-        scrollbar-width: thin;  /* Reduced width for Firefox */
-        scrollbar-color: #888 #f1f1f1;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# Set up Streamlit layout with two columns
-col1, col2 = st.columns([1, 5])
-
-# Display the frozen column in the left section
-with col1:
-    st.write("Frozen Column")
-    st.data_editor(df[["Frozen Column"]], hide_index=True)
-
-# Display the scrollable columns in the right section
-with col2:
-    st.write("Scrollable Columns")
-    st.data_editor(df.drop(columns=["Frozen Column"]), hide_index=True)
+        # Display the table data
+        st.dataframe(df)
